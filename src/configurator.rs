@@ -1,115 +1,155 @@
 use std::collections::HashMap;
 
-use serde::Serialize;
-use tide::{http::mime, Request, Response, Server, StatusCode};
+use hyper::StatusCode;
+use warp::{Filter, Reply};
 
 use crate::config::{self, Config, DomainPool};
 
-pub fn setup_handlers(app: &mut Server<()>) {
-    app.at("/config").get(get_config);
-    app.at("/config").put(set_config);
-    app.at("/config/listeners").get(get_listeners);
-    app.at("/config/listeners").put(set_listeners);
-    app.at("/config/listeners").post(add_listeners);
-    app.at("/config/stash").get(get_stash);
-    app.at("/config/stash").put(set_stash);
-    app.at("/config/stash/domain_pools").get(get_domain_pools);
-    app.at("/config/stash/domain_pools").put(set_domain_pools);
-    app.at("/config/stash/domain_pools/:pool")
-        .get(get_domain_pool);
-    app.at("/config/stash/domain_pools/:pool")
-        .put(set_domain_pool);
-    app.at("/config/stash/domain_pools/:pool")
-        .post(add_domain_pool);
-    app.at("/config/stash/domain_pools/:pool")
-        .delete(del_domain_pool);
-    app.at("/config/chains").get(get_chains);
-    app.at("/config/chains").put(set_chains);
-    app.at("/config/chains/:chain").get(get_chain);
-    app.at("/config/chains/:chain").put(set_chain);
-    app.at("/config/chains/:chain").post(add_chain);
-    app.at("/config/chains/:chain").delete(del_chain);
+pub async fn start() {
+    let config = {
+        let get = warp::get().then(get_config);
+        let set = warp::put().and(warp::body::json()).then(set_config);
+        warp::path!("config").and(get.or(set))
+    };
+
+    let listeners = {
+        let get = warp::get().then(get_listeners);
+        let set = warp::put().and(warp::body::json()).then(set_listeners);
+        let add = warp::post().and(warp::body::json()).then(add_listeners);
+        warp::path!("config" / "listeners").and(get.or(set).or(add))
+    };
+
+    let stash = {
+        let get = warp::get().then(get_stash);
+        let set = warp::put().and(warp::body::json()).then(set_stash);
+        warp::path!("config" / "stash").and(get.or(set))
+    };
+
+    let domain_pools = {
+        let get = warp::get().then(get_domain_pools);
+        let set = warp::put().and(warp::body::json()).then(set_domain_pools);
+        warp::path!("config" / "stash" / "domain_pools").and(get.or(set))
+    };
+
+    let domain_pool = {
+        let path = warp::path!("config" / "stash" / "domain_pools" / String);
+        let get = warp::get().and(path).then(get_domain_pool);
+        let set = warp::put()
+            .and(path)
+            .and(warp::body::json())
+            .then(set_domain_pool);
+        let add = warp::post()
+            .and(path)
+            .and(warp::body::json())
+            .then(add_domain_pool);
+        let del = warp::delete().and(path).then(del_domain_pool);
+        get.or(set).or(add).or(del)
+    };
+
+    let chains = {
+        let get = warp::get().then(get_chains);
+        let set = warp::put().and(warp::body::json()).then(set_chains);
+        warp::path!("config" / "chains").and(get.or(set))
+    };
+
+    let chain = {
+        let path = warp::path!("config" / "chains" / String);
+        let get = warp::get().and(path).then(get_chain);
+        let set = warp::put()
+            .and(path)
+            .and(warp::body::json())
+            .then(set_chain);
+        let add = warp::post()
+            .and(path)
+            .and(warp::body::json())
+            .then(add_chain);
+        let del = warp::delete().and(path).then(del_chain);
+        get.or(set).or(add).or(del)
+    };
+
+    let routes = config
+        .or(listeners)
+        .or(stash)
+        .or(domain_pools)
+        .or(domain_pool)
+        .or(chains)
+        .or(chain);
+
+    let addr = crate::args::Args::get().control;
+    warp::serve(routes).run(addr).await;
 }
 
-async fn get_config(_req: Request<()>) -> tide::Result {
+async fn get_config() -> warp::reply::Json {
     let config = config::get_current_config().await;
-    json_response(StatusCode::Ok, &config.as_ref())
+    warp::reply::json(config.as_ref())
 }
 
-async fn set_config(mut req: Request<()>) -> tide::Result {
-    let config: config::Config = req.body_json().await?;
+async fn set_config(config: Config) -> StatusCode {
     config::set_new_config(config).await;
-    simple_response(StatusCode::Accepted)
+    StatusCode::ACCEPTED
 }
 
-async fn get_listeners(_req: Request<()>) -> tide::Result {
+async fn get_listeners() -> warp::reply::Json {
     let config = config::get_current_config().await;
-    json_response(StatusCode::Ok, &config.as_ref().listeners)
+    warp::reply::json(&config.as_ref().listeners)
 }
 
-async fn set_listeners(mut req: Request<()>) -> tide::Result {
-    let listeners: Vec<config::Listener> = req.body_json().await?;
+async fn set_listeners(listeners: Vec<config::Listener>) -> StatusCode {
     let old_config = config::get_current_config().await;
     let config = Config {
         listeners: listeners,
         ..old_config.as_ref().clone()
     };
     config::set_new_config(config).await;
-    simple_response(StatusCode::Accepted)
+    StatusCode::ACCEPTED
 }
 
-async fn add_listeners(mut req: Request<()>) -> tide::Result {
-    let listener: config::Listener = req.body_json().await?;
+async fn add_listeners(listener: config::Listener) -> StatusCode {
     let old_config = config::get_current_config().await;
     let mut config = old_config.as_ref().clone();
     config.listeners.push(listener);
     config::set_new_config(config).await;
-    simple_response(StatusCode::Accepted)
+    StatusCode::ACCEPTED
 }
 
-async fn get_stash(_req: Request<()>) -> tide::Result {
+async fn get_stash() -> warp::reply::Json {
     let config = config::get_current_config().await;
-    json_response(StatusCode::Ok, &config.as_ref().stash)
+    warp::reply::json(&config.as_ref().stash)
 }
 
-async fn set_stash(mut req: Request<()>) -> tide::Result {
-    let stash: config::Stash = req.body_json().await?;
+async fn set_stash(stash: config::Stash) -> StatusCode {
     let old_config = config::get_current_config().await;
     let config = Config {
         stash: stash,
         ..old_config.as_ref().clone()
     };
     config::set_new_config(config).await;
-    simple_response(StatusCode::Accepted)
+    StatusCode::ACCEPTED
 }
 
-async fn get_domain_pools(_req: Request<()>) -> tide::Result {
+async fn get_domain_pools() -> warp::reply::Json {
     let config = config::get_current_config().await;
-    json_response(StatusCode::Ok, &config.as_ref().stash.domain_pools)
+    warp::reply::json(&config.as_ref().stash.domain_pools)
 }
 
-async fn set_domain_pools(mut req: Request<()>) -> tide::Result {
-    let domain_pools: HashMap<String, config::DomainPool> = req.body_json().await?;
+async fn set_domain_pools(domain_pools: HashMap<String, config::DomainPool>) -> StatusCode {
     let old_config = config::get_current_config().await;
     let mut config = old_config.as_ref().clone();
     config.stash.domain_pools = domain_pools;
     config::set_new_config(config).await;
-    simple_response(StatusCode::Accepted)
+    StatusCode::ACCEPTED
 }
 
-async fn get_domain_pool(req: Request<()>) -> tide::Result {
-    let pool_name = req.param("pool")?;
+async fn get_domain_pool(pool_name: String) -> warp::reply::Response {
     let config = config::get_current_config().await;
-    let pool = config.as_ref().stash.domain_pools.get(pool_name);
+    let pool = config.as_ref().stash.domain_pools.get(&pool_name);
     match pool {
-        Some(value) => json_response(StatusCode::Ok, value),
-        None => simple_response(StatusCode::NotFound),
+        Some(value) => warp::reply::json(value).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
-async fn set_domain_pool(mut req: Request<()>) -> tide::Result {
-    let domain_pool: config::DomainPool = req.body_json().await?;
-    let pool_name = req.param("pool")?;
+async fn set_domain_pool(pool_name: String, domain_pool: config::DomainPool) -> StatusCode {
     let old_config = config::get_current_config().await;
     let mut config = old_config.as_ref().clone();
     let old_domain_pool = config
@@ -117,130 +157,104 @@ async fn set_domain_pool(mut req: Request<()>) -> tide::Result {
         .domain_pools
         .insert(String::from(pool_name), domain_pool);
     let status = if old_domain_pool.is_some() {
-        StatusCode::Accepted
+        StatusCode::ACCEPTED
     } else {
-        StatusCode::Created
+        StatusCode::CREATED
     };
     config::set_new_config(config).await;
-    simple_response(status)
+    status
 }
 
-async fn add_domain_pool(mut req: Request<()>) -> tide::Result {
-    let domain: String = req.body_json().await?;
-    let pool_name = req.param("pool")?;
+async fn add_domain_pool(pool_name: String, domain: String) -> StatusCode {
     let old_config = config::get_current_config().await;
     let mut config = old_config.as_ref().clone();
-    let mut status = StatusCode::Accepted;
+    let mut status = StatusCode::ACCEPTED;
     let domain_pool = config
         .stash
         .domain_pools
         .entry(String::from(pool_name))
         .or_insert_with(|| {
-            status = StatusCode::Created;
+            status = StatusCode::CREATED;
             DomainPool::default()
         });
     domain_pool.0.insert(domain);
     config::set_new_config(config).await;
-    simple_response(status)
+    status
 }
 
-async fn del_domain_pool(req: Request<()>) -> tide::Result {
-    let pool_name = req.param("pool")?;
+async fn del_domain_pool(pool_name: String) -> StatusCode {
     let old_config = config::get_current_config().await;
     let mut config = old_config.as_ref().clone();
-    let removed = config.stash.domain_pools.remove(pool_name);
+    let removed = config.stash.domain_pools.remove(&pool_name);
     config::set_new_config(config).await;
-    let status = if removed.is_some() {
-        StatusCode::Accepted
+    if removed.is_some() {
+        StatusCode::ACCEPTED
     } else {
-        StatusCode::NotModified
-    };
-    simple_response(status)
+        StatusCode::NOT_MODIFIED
+    }
 }
 
-async fn get_chains(_req: Request<()>) -> tide::Result {
+async fn get_chains() -> warp::reply::Json {
     let config = config::get_current_config().await;
-    json_response(StatusCode::Ok, &config.as_ref().chains)
+    warp::reply::json(&config.as_ref().chains)
 }
 
-async fn set_chains(mut req: Request<()>) -> tide::Result {
-    let chains: HashMap<String, Vec<config::ChainRoute>> = req.body_json().await?;
+async fn set_chains(chains: HashMap<String, Vec<config::ChainRoute>>) -> StatusCode {
     let old_config = config::get_current_config().await;
     let config = Config {
         chains: chains,
         ..old_config.as_ref().clone()
     };
     config::set_new_config(config).await;
-    simple_response(StatusCode::Accepted)
+    StatusCode::ACCEPTED
 }
 
-async fn get_chain(req: Request<()>) -> tide::Result {
-    let chain_name = req.param("chain")?;
+async fn get_chain(chain_name: String) -> warp::reply::Response {
     let config = config::get_current_config().await;
-    let chain = config.as_ref().chains.get(chain_name);
+    let chain = config.as_ref().chains.get(&chain_name);
     match chain {
-        Some(value) => json_response(StatusCode::Ok, value),
-        None => simple_response(StatusCode::NotFound),
+        Some(value) => warp::reply::json(value).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
-async fn set_chain(mut req: Request<()>) -> tide::Result {
-    let chain: Vec<config::ChainRoute> = req.body_json().await?;
-    let chain_name = req.param("chain")?;
+async fn set_chain(chain_name: String, chain: Vec<config::ChainRoute>) -> StatusCode {
     let old_config = config::get_current_config().await;
     let mut config = old_config.as_ref().clone();
     let old_chain = config.chains.insert(String::from(chain_name), chain);
     let status = if old_chain.is_some() {
-        StatusCode::Accepted
+        StatusCode::ACCEPTED
     } else {
-        StatusCode::Created
+        StatusCode::CREATED
     };
     config::set_new_config(config).await;
-    simple_response(status)
+    status
 }
 
-async fn add_chain(mut req: Request<()>) -> tide::Result {
-    let chain_route: config::ChainRoute = req.body_json().await?;
-    let chain_name = req.param("chain")?;
+async fn add_chain(chain_name: String, chain_route: config::ChainRoute) -> StatusCode {
     let old_config = config::get_current_config().await;
     let mut config = old_config.as_ref().clone();
-    let mut status = StatusCode::Accepted;
+    let mut status = StatusCode::ACCEPTED;
     let chain = config
         .chains
         .entry(String::from(chain_name))
         .or_insert_with(|| {
-            status = StatusCode::Created;
+            status = StatusCode::CREATED;
             Vec::default()
         });
     chain.push(chain_route);
     config::set_new_config(config).await;
-    simple_response(status)
+    status
 }
 
-async fn del_chain(req: Request<()>) -> tide::Result {
-    let chain_name = req.param("chain")?;
+async fn del_chain(chain_name: String) -> StatusCode {
     let old_config = config::get_current_config().await;
     let mut config = old_config.as_ref().clone();
-    let removed = config.chains.remove(chain_name);
+    let removed = config.chains.remove(&chain_name);
     config::set_new_config(config).await;
-    let status = if removed.is_some() {
-        StatusCode::Accepted
+    if removed.is_some() {
+        StatusCode::ACCEPTED
     } else {
-        StatusCode::NotModified
-    };
-    simple_response(status)
-}
-
-fn simple_response(status: StatusCode) -> tide::Result {
-    let response = Response::builder(status).build();
-    Ok(response)
-}
-
-fn json_response<T: Serialize>(status: StatusCode, body: &T) -> tide::Result {
-    let contents = serde_json::to_string(body)?;
-    let response = Response::builder(status)
-        .body(contents)
-        .content_type(mime::JSON)
-        .build();
-    Ok(response)
+        StatusCode::NOT_MODIFIED
+    }
 }

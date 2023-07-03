@@ -3,8 +3,8 @@ use std::{
     sync::Arc,
 };
 
-use async_std::{fs, sync::RwLock};
 use serde::{Deserialize, Serialize};
+use tokio::{fs, sync::RwLock};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 const CONFIG_FILENAME: &str = "config.json";
@@ -42,7 +42,7 @@ fn default_http_port() -> u16 {
 pub enum ListenerKind {
     #[default]
     HTTP,
-    HTTPS,
+    TLS,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -129,20 +129,8 @@ impl std::fmt::Debug for Password {
     }
 }
 
-// lazy_static::lazy_static! {
-//     static ref CONFIGURATION: RwLock<Arc<Config>> = RwLock::new(Arc::new(Config::default()));
-// }
-
 lazy_static::lazy_static! {
-    static ref CONFIGURATION: RwLock<Arc<Config>> = RwLock::new(Arc::new(Config {
-        listeners: Vec::default(),
-        chains: HashMap::default(),
-        stash: Stash {
-            domain_pools: HashMap::from([
-                (String::from("blocked"), DomainPool(BTreeSet::from([String::from("rutracker.org")])))
-            ])
-        }
-    }));
+    static ref CONFIGURATION: RwLock<Arc<Config>> = RwLock::new(Arc::new(Config::default()));
 }
 
 pub async fn get_current_config() -> Arc<Config> {
@@ -150,11 +138,13 @@ pub async fn get_current_config() -> Arc<Config> {
 }
 
 pub async fn set_new_config(config: Config) {
-    let mut configuration = CONFIGURATION.write().await;
-    *configuration = Arc::new(config);
-    let config = configuration.as_ref();
+    {
+        let mut configuration = CONFIGURATION.write().await;
+        *configuration = Arc::new(config);
+    }
+    let config = get_current_config().await;
     log::info!("update configuration to {:?}", config);
-    match serde_json::to_string(config) {
+    match serde_json::to_string(config.as_ref()) {
         Ok(contents) => match fs::write(CONFIG_FILENAME, contents).await {
             Ok(_) => {
                 log::info!("saved updated configuration to disk")
@@ -165,7 +155,7 @@ pub async fn set_new_config(config: Config) {
     }
 }
 
-pub async fn initialize_config() {
+pub async fn init_config() {
     match fs::read(CONFIG_FILENAME).await {
         Ok(content_bytes) => match String::from_utf8(content_bytes) {
             Ok(content) => {
