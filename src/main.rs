@@ -5,7 +5,7 @@ mod configurator;
 mod http_proxy;
 mod logging;
 mod server;
-mod tls;
+mod tls_proxy;
 
 #[tokio::main]
 async fn main() {
