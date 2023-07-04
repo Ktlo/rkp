@@ -8,7 +8,7 @@ pub struct Args {
     #[arg(short = 'f', long, default_value_t = String::from("config.json"))]
     pub config: String,
 
-    #[arg(short, long, default_value_t = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 1339))]
+    #[arg(short, long, default_value_t = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1339))]
     pub control: SocketAddr,
 
     #[arg(short, long, default_value_t = String::from("log.yaml"))]

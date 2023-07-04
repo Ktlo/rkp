@@ -199,7 +199,7 @@ async fn get_chains() -> warp::reply::Json {
     warp::reply::json(&config.as_ref().chains)
 }
 
-async fn set_chains(chains: HashMap<String, Vec<config::ChainRoute>>) -> StatusCode {
+async fn set_chains(chains: HashMap<String, Vec<config::ChainRule>>) -> StatusCode {
     let old_config = config::get_current_config().await;
     let config = Config {
         chains: chains,
@@ -218,7 +218,7 @@ async fn get_chain(chain_name: String) -> warp::reply::Response {
     }
 }
 
-async fn set_chain(chain_name: String, chain: Vec<config::ChainRoute>) -> StatusCode {
+async fn set_chain(chain_name: String, chain: Vec<config::ChainRule>) -> StatusCode {
     let old_config = config::get_current_config().await;
     let mut config = old_config.as_ref().clone();
     let old_chain = config.chains.insert(String::from(chain_name), chain);
@@ -231,7 +231,7 @@ async fn set_chain(chain_name: String, chain: Vec<config::ChainRoute>) -> Status
     status
 }
 
-async fn add_chain(chain_name: String, chain_route: config::ChainRoute) -> StatusCode {
+async fn add_chain(chain_name: String, chain_route: config::ChainRule) -> StatusCode {
     let old_config = config::get_current_config().await;
     let mut config = old_config.as_ref().clone();
     let mut status = StatusCode::ACCEPTED;

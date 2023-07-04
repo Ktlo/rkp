@@ -1,5 +1,6 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
+    net::{Ipv4Addr, SocketAddr},
     sync::Arc,
 };
 
@@ -14,31 +15,25 @@ pub struct Config {
     #[serde(default)]
     pub listeners: Vec<Listener>,
     #[serde(default)]
-    pub chains: HashMap<String, Vec<ChainRoute>>,
+    pub chains: HashMap<String, Vec<ChainRule>>,
     #[serde(default)]
     pub stash: Stash,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct Listener {
     #[serde(default)]
     pub kind: ListenerKind,
-    #[serde(default = "default_listener_host")]
-    pub host: String,
-    #[serde(default = "default_http_port")]
-    port: u16,
+    #[serde(default = "default_listener_address")]
+    pub address: SocketAddr,
     pub forward: String, // chain
 }
 
-fn default_listener_host() -> String {
-    String::from("0.0.0.0")
+fn default_listener_address() -> SocketAddr {
+    SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::UNSPECIFIED), 80)
 }
 
-fn default_http_port() -> u16 {
-    80
-}
-
-#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Hash)]
 pub enum ListenerKind {
     #[default]
     HTTP,
@@ -67,7 +62,7 @@ impl std::fmt::Debug for DomainPool {
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
-pub struct ChainRoute {
+pub struct ChainRule {
     #[serde(default)]
     pub filter: ChainFilter,
     #[serde(default)]
@@ -97,15 +92,6 @@ pub enum ChainAction {
         #[serde(default)]
         credentials: Option<Credentials>,
         address: String,
-        #[serde(default = "default_socks_port")]
-        port: u16,
-    },
-    HttpProxy {
-        #[serde(default)]
-        credentials: Option<Credentials>,
-        address: String,
-        #[serde(default = "default_http_port")]
-        port: u16,
     },
     Drop,
 }
@@ -138,8 +124,19 @@ pub async fn get_current_config() -> Arc<Config> {
 }
 
 pub async fn set_new_config(config: Config) {
+    let mut listeners_to_delete: HashSet<Listener>;
+    let mut listeners_to_create: HashSet<Listener>;
     {
         let mut configuration = CONFIGURATION.write().await;
+        let old_config = configuration.as_ref();
+        listeners_to_delete = old_config.listeners.clone().into_iter().collect();
+        for listener in &config.listeners {
+            listeners_to_delete.remove(&listener);
+        }
+        listeners_to_create = config.listeners.clone().into_iter().collect();
+        for listener in &old_config.listeners {
+            listeners_to_create.remove(&listener);
+        }
         *configuration = Arc::new(config);
     }
     let config = get_current_config().await;
@@ -152,6 +149,12 @@ pub async fn set_new_config(config: Config) {
             Err(_) => {}
         },
         Err(_) => {}
+    }
+    for listener in listeners_to_delete {
+        delete_listener(listener)
+    }
+    for listener in listeners_to_create {
+        create_listener(listener)
     }
 }
 
@@ -185,6 +188,10 @@ pub async fn init_config() {
         }
     }
 }
+
+fn create_listener(listener: Listener) {}
+
+fn delete_listener(listener: Listener) {}
 
 #[test]
 fn default_parse_test() {
