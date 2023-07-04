@@ -1,8 +1,8 @@
 use core::{task, task::Poll};
-use std::{future::Future, net::SocketAddr, pin::Pin};
+use std::{future::Future, net::SocketAddr, pin::Pin, str::FromStr};
 
 use crate::chain;
-use hyper::{http, Body, Client, Request, Response, Server, Uri};
+use hyper::{body::HttpBody, http, Body, Client, Request, Response, Server, Uri};
 use tokio::net::TcpStream;
 
 #[derive(Debug)]
@@ -12,7 +12,7 @@ struct HttpProxy {
 
 impl hyper::service::Service<Request<Body>> for HttpProxy {
     type Response = Response<Body>;
-    type Error = hyper::Error;
+    type Error = anyhow::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -44,24 +44,15 @@ impl<T> hyper::service::Service<T> for MakeHttpProxy {
     }
 }
 
-pub async fn actor(address: &SocketAddr, chain: &String) {
+pub async fn actor(address: SocketAddr, chain: String) -> anyhow::Result<()> {
     let make_service = MakeHttpProxy {
         chain: chain.to_owned(),
     };
-
-    let server = match Server::try_bind(&address) {
-        Ok(builder) => builder
-            .http1_preserve_header_case(true)
-            .http1_title_case_headers(true)
-            .serve(make_service),
-        Err(error) => {
-            log::error!("failed to bind a port: {}", error);
-            return;
-        }
-    };
-    if let Err(error) = server.await {
-        log::error!("error in http proxy: {}", error);
-    };
+    let server = Server::try_bind(&address)?
+        .http1_preserve_header_case(true)
+        .http1_title_case_headers(true)
+        .serve(make_service);
+    Ok(server.await?)
 }
 
 #[derive(Clone)]
@@ -87,15 +78,22 @@ impl hyper::service::Service<Uri> for ChainConnector {
     }
 }
 
-async fn proxy(req: Request<Body>, chain: String) -> Result<Response<Body>, hyper::Error> {
-    let uri = req.uri();
-    let host = match uri.host() {
-        Some(host) => host,
+async fn proxy(req: Request<Body>, chain: String) -> Result<Response<Body>, anyhow::Error> {
+    let address = match req.headers().get(hyper::header::HOST) {
+        Some(address) => match address.to_str() {
+            Ok(value) => value,
+            Err(error) => {
+                log::debug!("bad Host header; drop: {}", error);
+                return respond_status(http::StatusCode::BAD_REQUEST);
+            }
+        },
         None => {
             log::debug!("no Host header in http request; drop");
             return respond_status(http::StatusCode::BAD_REQUEST);
         }
     };
+    let uri = Uri::from_str(&format!("proto://{}", address))?;
+    let host = uri.host().unwrap();
     let port = match uri.port() {
         Some(port) => port.as_u16(),
         None => 80,
@@ -104,7 +102,7 @@ async fn proxy(req: Request<Body>, chain: String) -> Result<Response<Body>, hype
     let context = chain::Context {
         host: host.to_owned(),
         port: port,
-        address: address,
+        address: address.to_owned(),
     };
     let connector = ChainConnector {
         context: context,
@@ -113,13 +111,30 @@ async fn proxy(req: Request<Body>, chain: String) -> Result<Response<Body>, hype
     let client = Client::builder()
         .http1_title_case_headers(true)
         .http1_preserve_header_case(true)
+        .set_host(false)
         .build(connector);
-    client.request(req).await
+    let old_uri = req.uri();
+    let new_uri = Uri::builder().scheme("http").authority(address);
+    let new_uri = if let Some(value) = old_uri.path_and_query() {
+        new_uri.path_and_query(value.to_owned())
+    } else {
+        new_uri
+    };
+    let new_uri = new_uri
+        .path_and_query(old_uri.path_and_query().unwrap().to_owned())
+        .build()?;
+    let builder = Request::builder()
+        .method(req.method())
+        .uri(new_uri)
+        .version(req.version());
+    let builder = req
+        .headers()
+        .into_iter()
+        .fold(builder, |builder, (key, value)| builder.header(key, value));
+    let new_req = builder.body(req.boxed())?;
+    Ok(client.request(new_req).await?)
 }
 
-fn respond_status(status: http::StatusCode) -> Result<Response<Body>, hyper::Error> {
-    Ok(Response::builder()
-        .status(status)
-        .body(Body::empty())
-        .unwrap())
+fn respond_status(status: http::StatusCode) -> Result<Response<Body>, anyhow::Error> {
+    Ok(Response::builder().status(status).body(Body::empty())?)
 }

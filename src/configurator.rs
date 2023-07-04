@@ -1,22 +1,16 @@
 use std::collections::HashMap;
 
+use anyhow::Ok;
 use hyper::StatusCode;
 use warp::{Filter, Reply};
 
 use crate::config::{self, Config, DomainPool};
 
-pub async fn start() {
+pub async fn start() -> anyhow::Result<()> {
     let config = {
         let get = warp::get().then(get_config);
         let set = warp::put().and(warp::body::json()).then(set_config);
         warp::path!("config").and(get.or(set))
-    };
-
-    let listeners = {
-        let get = warp::get().then(get_listeners);
-        let set = warp::put().and(warp::body::json()).then(set_listeners);
-        let add = warp::post().and(warp::body::json()).then(add_listeners);
-        warp::path!("config" / "listeners").and(get.or(set).or(add))
     };
 
     let stash = {
@@ -68,7 +62,6 @@ pub async fn start() {
     };
 
     let routes = config
-        .or(listeners)
         .or(stash)
         .or(domain_pools)
         .or(domain_pool)
@@ -77,6 +70,7 @@ pub async fn start() {
 
     let addr = crate::args::Args::get().control;
     warp::serve(routes).run(addr).await;
+    Ok(())
 }
 
 async fn get_config() -> warp::reply::Json {
@@ -85,29 +79,6 @@ async fn get_config() -> warp::reply::Json {
 }
 
 async fn set_config(config: Config) -> StatusCode {
-    config::set_new_config(config).await;
-    StatusCode::ACCEPTED
-}
-
-async fn get_listeners() -> warp::reply::Json {
-    let config = config::get_current_config().await;
-    warp::reply::json(&config.as_ref().listeners)
-}
-
-async fn set_listeners(listeners: Vec<config::Listener>) -> StatusCode {
-    let old_config = config::get_current_config().await;
-    let config = Config {
-        listeners: listeners,
-        ..old_config.as_ref().clone()
-    };
-    config::set_new_config(config).await;
-    StatusCode::ACCEPTED
-}
-
-async fn add_listeners(listener: config::Listener) -> StatusCode {
-    let old_config = config::get_current_config().await;
-    let mut config = old_config.as_ref().clone();
-    config.listeners.push(listener);
     config::set_new_config(config).await;
     StatusCode::ACCEPTED
 }

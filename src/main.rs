@@ -4,6 +4,7 @@ mod config;
 mod configurator;
 mod http_proxy;
 mod logging;
+mod server;
 mod tls;
 
 #[tokio::main]
@@ -11,5 +12,7 @@ async fn main() {
     logging::init_logging();
     config::init_config().await;
 
-    configurator::start().await;
+    futures::future::try_join(configurator::start(), server::start())
+        .await
+        .unwrap();
 }
