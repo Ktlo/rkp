@@ -3,7 +3,8 @@ name = "rkp"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.release]
+lto = true
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -21,5 +22,4 @@ fast-socks5 = { version = "0.8" }
 wildmatch = { version = "2.1" }
 async-recursion = { version = "1.0" }
 futures = { version = "0.3" }
-async-trait = { version = "0.1" }
 bytes = { version = "1.4" }
