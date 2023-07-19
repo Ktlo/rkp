@@ -52,6 +52,7 @@ async fn resolve_chain(
                     credentials,
                     address,
                 } => socks5_connect(address, &context.host, context.port, credentials).await,
+                ChainAction::Forward { address } => direct_connect(&address).await,
                 ChainAction::Drop => Err(anyhow::anyhow!("drop")),
             };
         }

@@ -70,6 +70,9 @@ pub enum ChainAction {
         credentials: Option<Credentials>,
         address: String,
     },
+    Forward {
+        address: String,
+    },
     Drop,
 }
 
