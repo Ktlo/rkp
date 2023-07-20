@@ -4,6 +4,7 @@ mod config;
 mod configurator;
 mod http_proxy;
 mod logging;
+mod mc_proxy;
 mod server;
 mod tls_proxy;
 

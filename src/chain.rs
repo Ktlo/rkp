@@ -5,7 +5,7 @@ use wildmatch::WildMatch;
 
 use crate::config::{self, ChainAction, ChainFilter, ChainRule, Credentials};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Context {
     pub host: String,
     pub port: u16,
@@ -13,6 +13,7 @@ pub struct Context {
 }
 
 pub async fn connect(context: Context, start: String) -> Result<TcpStream, anyhow::Error> {
+    log::debug!("resolve proxy stream for context: {:?}", &context);
     let config = config::get_current_config().await;
     resolve(&config, &context, &start).await
 }

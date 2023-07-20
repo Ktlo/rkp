@@ -2,7 +2,7 @@ use std::pin::Pin;
 
 use futures::Future;
 
-use crate::{args, http_proxy, tls_proxy};
+use crate::{args, http_proxy, mc_proxy, tls_proxy};
 
 pub async fn start() -> anyhow::Result<()> {
     let args = args::Args::get();
@@ -14,6 +14,10 @@ pub async fn start() -> anyhow::Result<()> {
             f
         }
         args::ListenerKind::TLS => Box::pin(tls_proxy::actor(
+            listener.addr.clone(),
+            listener.chain.clone(),
+        )),
+        args::ListenerKind::MC => Box::pin(mc_proxy::actor(
             listener.addr.clone(),
             listener.chain.clone(),
         )),

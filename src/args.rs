@@ -16,6 +16,7 @@ pub struct Listener {
 pub enum ListenerKind {
     HTTP,
     TLS,
+    MC,
 }
 
 impl FromStr for Listener {
@@ -71,6 +72,7 @@ impl FromStr for ListenerKind {
         match &lower[..] {
             "http" => Ok(ListenerKind::HTTP),
             "tls" => Ok(ListenerKind::TLS),
+            "mc" => Ok(ListenerKind::MC),
             _ => Err(anyhow::anyhow!("unknown listener kind \"{}\"", s)),
         }
     }
